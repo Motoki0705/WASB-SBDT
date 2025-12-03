@@ -131,7 +131,7 @@ class Evaluator(object):
 
     @property
     def rmse(self):
-        _rmse = - np.Inf
+        _rmse = - np.inf
         if len(self.sq_errs) > 0:
             _rmse = np.sqrt(np.array(self.sq_errs).mean())
         return _rmse

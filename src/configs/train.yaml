@@ -1,0 +1,26 @@
+defaults:
+  - runner: train
+  - dataset: tennis
+  - model: wasb
+  - dataloader: default
+  - loss: hm_bce
+  - optimizer: adam_multistep
+  - detector: tracknetv2
+  - transform: default
+  - tracker: online
+  - _self_
+
+hydra:
+  run:
+    dir: /root/outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
+
+output_dir:
+seed: 1234
+
+# Enable training split loading
+# (dataloader/default.yaml is used as a base and overridden here)
+dataloader:
+  train: True
+  test: True
+  train_clip: False
+  test_clip: True

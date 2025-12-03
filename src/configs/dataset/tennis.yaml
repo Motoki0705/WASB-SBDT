@@ -1,6 +1,6 @@
 name: tennis
 ext: '.jpg'
-root_dir: /root/datasets/tennis
+root_dir: /root/repos/tennis-lab/data/tennis
 csv_filename: 'Label.csv'
 visible_flags: [1,2]
 train:
@@ -10,7 +10,18 @@ train:
              'game4', 
              'game5', 
              'game6',
-             'game7']
+             'game7',
+             'game11',
+             'game12',
+             'game13',
+             'game14',
+             'game15',
+             'game16',
+             'game17',
+             'game18',
+             'game19',
+             'game20',
+             'game21']
   num_clip_ratio: 1.0
   refine_npz_path: 
 test:

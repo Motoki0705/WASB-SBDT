@@ -1,0 +1,26 @@
+name: train
+device: cuda
+gpus: [0]
+max_epochs: 30
+
+test:
+  run: False
+  epoch_start: 1
+  epoch_step: 1
+  run_before_train: False
+  run_after_train_with_best: False
+
+inference_video:
+  run: False
+  epoch_start: 1
+  epoch_step: 1
+  run_before_train: False
+  run_after_train_with_best: False
+
+find_fp1_epochs: []
+fp1_filename:
+best_model_name: best_model.pth.tar
+
+eval:
+  score_threshold: 0.5
+  dist_threshold: 4

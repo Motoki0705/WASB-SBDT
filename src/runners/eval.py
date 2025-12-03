@@ -175,7 +175,7 @@ class VideosInferenceRunner(BaseRunner):
             self._clip_loaders_and_gts = clip_loaders_and_gts
 
     def run(self, model=None, model_dir=None):
-        return self._run_model()
+        return self._run_model(model=model)
 
     def _run_model(self, model=None):
         #evaluator = build_evaluator(self._cfg)

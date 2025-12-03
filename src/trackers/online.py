@@ -49,9 +49,9 @@ class OnlineTracker:
         self._track    = Track()
 
     def _select_best(self, frame_dets):
-        best_score = - np.Inf
+        best_score = - np.inf
         visi       = False
-        x, y       = - np.Inf, - np.Inf
+        x, y       = - np.inf, - np.inf
 
         xy_pred = None
     

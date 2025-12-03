@@ -4,12 +4,14 @@ from .monotrack import MonoTrack
 from .hrnet import HRNet
 from .deepball import DeepBall
 from .ballseg import BallSeg
+from .hrcnet import HRCNetForWASB
 
 __factory = {
     'tracknetv2': TrackNetV2,
     'monotrack': MonoTrack,
     'restracknetv2': ChangsTrackNet,
     'hrnet': HRNet,
+    'hrcnet': HRCNetForWASB,
     'deepball': DeepBall,
     'ballseg': BallSeg
         }
@@ -26,6 +28,32 @@ def build_model(cfg):
         model      = __factory[model_name]( frames_in*3, frames_out, bilinear=bilinear, halve_channel=halve_channel)
     elif model_name=='higher_hrnet' or model_name=='cls_hrnet' or model_name=='hrnet':
         model = __factory[model_name](cfg['model'])
+    elif model_name=='hrcnet':
+        mcfg = cfg['model']
+        frames_in  = mcfg['frames_in']
+        frames_out = mcfg['frames_out']
+        high_channels = mcfg['high_channels']
+        low_channels  = mcfg['low_channels']
+        num_stages    = mcfg.get('num_stages', 3)
+        num_high      = mcfg.get('num_high_blocks', 2)
+        num_low       = mcfg.get('num_low_blocks', 1)
+        upsample_mode = mcfg.get('upsample_mode', 'nearest')
+        down_kwargs   = mcfg.get('downsample', {})
+        tt = mcfg.get('transformer', {})
+        model = __factory[model_name](
+            in_channels=frames_in*3,
+            out_channels=frames_out,
+            high_channels=high_channels,
+            low_channels=low_channels,
+            num_stages=num_stages,
+            high_block='BASIC',
+            low_block='BASIC',
+            num_high_blocks=num_high,
+            num_low_blocks=num_low,
+            upsample_mode=upsample_mode,
+            downsample_kwargs=down_kwargs,
+            transformer_kwargs=tt,
+        )
     elif model_name=='restracknetv2':
         frames_in        = cfg['model']['frames_in']
         frames_out       = cfg['model']['frames_out']

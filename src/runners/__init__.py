@@ -3,14 +3,14 @@ from omegaconf import DictConfig, OmegaConf
 import hydra
 from hydra.core.hydra_config import HydraConfig
 
-# from .train_and_test import Trainer
+from .train_and_test import Trainer
 from .eval import VideosInferenceRunner
 from .extract_frame import ExtractFrameRunner
 
 log = logging.getLogger(__name__)
 
 __runner_factory = {
-    #'train': Trainer,
+    'train': Trainer,
     'eval': VideosInferenceRunner,
     'extract_frame': ExtractFrameRunner,
         }

@@ -16,7 +16,7 @@ from dataloaders import build_dataloader
 from losses import build_loss_criteria
 from optimizers import build_optimizer_and_scheduler
 from utils import save_checkpoint, set_seed, mkdir_if_missing, count_params, AverageMeter
-from .inference_videos import VideosInferenceRunner
+from .eval import VideosInferenceRunner
 from .base import BaseRunner
 from .runner_utils import train_epoch, test_epoch
 
@@ -116,8 +116,8 @@ class Trainer(BaseRunner):
         if self._inference_video_before_train:  
             self._vi_runner.run(model=self._model)
         
-        best_loss  = np.Inf
-        best_f1acc = -np.Inf
+        best_loss  = np.inf
+        best_f1acc = -np.inf
         #is_best    = False
         for epoch in range(self._max_epoch):
             log.info('(TRAIN) Epoch {}, lr: {}'.format(epoch+1, self._scheduler.get_last_lr()))

@@ -1,0 +1,27 @@
+name: hrcnet
+frames_in: 3
+frames_out: 3
+inp_height: 288
+inp_width: 512
+out_height: 288
+out_width: 512
+rgb_diff: False
+out_scales: [0]
+
+# HRCNet-specific hyperparameters
+high_channels: 64
+low_channels: 64
+num_stages: 3
+num_high_blocks: 2
+num_low_blocks: 1
+upsample_mode: nearest
+
+downsample:
+  num_downsample: 4
+
+transformer:
+  d_model: 64
+  num_heads: 8
+  dim_ff: 256
+  dropout: 0.1
+  depth: 2

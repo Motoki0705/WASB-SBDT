@@ -1,6 +1,6 @@
 name: eval
 device: cuda
-gpus: [0,1,2,3]
+gpus: [0]
 vis_result: False
 vis_hm: False
 vis_traj: False
