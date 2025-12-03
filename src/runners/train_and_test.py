@@ -10,6 +10,7 @@ from hydra.core.hydra_config import HydraConfig
 import numpy as np
 import torch
 from torch import nn
+from torch.cuda.amp import GradScaler
 
 from models import build_model
 from dataloaders import build_dataloader
@@ -109,6 +110,12 @@ class Trainer(BaseRunner):
 
         self._best_model_name = cfg['runner']['best_model_name']
 
+        # fp16 mixed precision training
+        self._use_fp16 = cfg['runner'].get('fp16', False)
+        self._scaler = GradScaler(enabled=self._use_fp16) if self._use_fp16 else None
+        if self._use_fp16:
+            log.info('FP16 mixed precision training enabled')
+
     def run(self):
 
         if self._test_before_train:
@@ -131,7 +138,9 @@ class Trainer(BaseRunner):
                                         self._train_loader, 
                                         self._loss_criteria, 
                                         self._optimizer, 
-                                        self._device
+                                        self._device,
+                                        use_fp16=self._use_fp16,
+                                        scaler=self._scaler
                             )
 
             is_best = False
@@ -141,7 +150,7 @@ class Trainer(BaseRunner):
                 if self._run_test:
                     log.info('(TEST) @ Epoch {}'.format(epoch+1))
                     torch.cuda.empty_cache()
-                    test_results = test_epoch(epoch+1, self._model, self._test_loader, self._loss_criteria, self._device, self._cfg)
+                    test_results = test_epoch(epoch+1, self._model, self._test_loader, self._loss_criteria, self._device, self._cfg, use_fp16=self._use_fp16)
                     torch.cuda.empty_cache()
 
             vi_results = {'prec': None, 'recall': None, 'f1': None, 'accuracy': None}

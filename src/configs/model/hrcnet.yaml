@@ -1,6 +1,6 @@
 name: hrcnet
 frames_in: 3
-frames_out: 3
+frames_out: 1
 inp_height: 288
 inp_width: 512
 out_height: 288

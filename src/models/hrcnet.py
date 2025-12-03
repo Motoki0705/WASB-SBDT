@@ -201,7 +201,7 @@ class ContextFusionBlock(nn.Module):
                 f"d_model ({d_model}) must match low_channels ({low_channels})."
             )
 
-        encoder_layer = nn.TransformerEncoderLayer(
+        encoder_layer_spatial = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=num_heads,
             dim_feedforward=dim_ff,
@@ -211,8 +211,23 @@ class ContextFusionBlock(nn.Module):
             norm_first=True,
             **t_kwargs,
         )
-        self.transformer = nn.TransformerEncoder(
-            encoder_layer,
+        self.spatial_transformer = nn.TransformerEncoder(
+            encoder_layer_spatial,
+            num_layers=depth,
+        )
+
+        encoder_layer_temporal = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=num_heads,
+            dim_feedforward=dim_ff,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+            **t_kwargs,
+        )
+        self.temporal_transformer = nn.TransformerEncoder(
+            encoder_layer_temporal,
             num_layers=depth,
         )
 
@@ -242,20 +257,41 @@ class ContextFusionBlock(nn.Module):
         Returns:
             Tuple of updated (high, low) feature maps with the same shapes as inputs.
         """
-        high = self.high_path(high)
-        low = self.low_cnn(low)
-        b, c, h, w = low.shape
-        low_seq = low.flatten(2).permute(0, 2, 1)
-        low_seq = self.transformer(low_seq)
-        low = low_seq.permute(0, 2, 1).view(b, c, h, w)
+        # Expect high: (B, T, C_high, H, W), low: (B, T, C_low, H_low, W_low)
+        b, t, c_high, h, w = high.shape
+        _, _, c_low, h_low, w_low = low.shape
 
-        low_up = F.interpolate(low, size=high.shape[-2:], mode=self.upsample_mode)
+        high_flat = high.view(b * t, c_high, h, w)
+        low_flat = low.view(b * t, c_low, h_low, w_low)
+
+        high_flat = self.high_path(high_flat)
+        low_flat = self.low_cnn(low_flat)
+
+        high = high_flat.view(b, t, c_high, h, w)
+        low = low_flat.view(b, t, c_low, h_low, w_low)
+
+        low_spatial = low.view(b * t, c_low, h_low * w_low).permute(0, 2, 1)
+        low_spatial = self.spatial_transformer(low_spatial)
+        low = low_spatial.permute(0, 2, 1).view(b, t, c_low, h_low, w_low)
+
+        low_tmp = low.permute(0, 3, 4, 1, 2)
+        low_seq = low_tmp.reshape(b * h_low * w_low, t, c_low)
+        low_seq = self.temporal_transformer(low_seq)
+        low_tmp = low_seq.view(b, h_low, w_low, t, c_low)
+        low = low_tmp.permute(0, 3, 4, 1, 2)
+
+        high_flat = high.view(b * t, c_high, h, w)
+        low_flat = low.view(b * t, c_low, h_low, w_low)
+
+        low_up = F.interpolate(low_flat, size=(h, w), mode=self.upsample_mode)
         low_up = self.low_to_high(low_up)
-        high = self.activation(high + low_up)
+        high_flat = self.activation(high_flat + low_up)
+        high = high_flat.view(b, t, c_high, h, w)
 
-        pooled = F.adaptive_avg_pool2d(high, output_size=low.shape[-2:])
+        pooled = F.adaptive_avg_pool2d(high_flat, output_size=(h_low, w_low))
         pooled = self.high_to_low(pooled)
-        low = self.activation(low + pooled)
+        low_flat = self.activation(low_flat + pooled)
+        low = low_flat.view(b, t, c_low, h_low, w_low)
 
         return high, low
 
@@ -300,7 +336,7 @@ class HRCNet(nn.Module):
         if num_stages < 1:
             raise ValueError("num_stages must be >= 1.")
 
-        self.in_channels = in_channels
+        self.in_channels = 3
         self.out_channels = out_channels
         self.high_channels = high_channels
         self.low_channels = low_channels
@@ -308,7 +344,7 @@ class HRCNet(nn.Module):
 
         self.stem = nn.Sequential(
             nn.Conv2d(
-                in_channels,
+                self.in_channels,
                 high_channels,
                 kernel_size=3,
                 stride=1,
@@ -386,16 +422,31 @@ class HRCNet(nn.Module):
                 - "high": final high-resolution features
                 - "low": final low-resolution features
         """
-        if x.dim() != 4:
-            raise ValueError(f"Expected 4D input (B, C, H, W), got shape {x.shape}.")
+        if x.dim() != 5:
+            raise ValueError(f"Expected 5D input (B, T, C, H, W), got shape {x.shape}.")
 
-        high = self.stem(x)
-        low = self.initial_down(high)
+        b, t, c, h, w = x.shape
+        if c != self.in_channels:
+            raise ValueError(f"Expected C={self.in_channels}, but got C={c}.")
+
+        x_flat = x.view(b * t, c, h, w)
+
+        high_flat = self.stem(x_flat)
+        low_flat = self.initial_down(high_flat)
+
+        _, _, h_low, w_low = low_flat.shape
+
+        high = high_flat.view(b, t, self.high_channels, high_flat.shape[-2], high_flat.shape[-1])
+        low = low_flat.view(b, t, self.low_channels, h_low, w_low)
 
         for stage in self.stages:
             high, low = stage(high, low)
 
-        out = self.head(high)
+        # High branch back to (B*T, C_high, H, W) for the head
+        _, _, c_high, h_out, w_out = high.shape
+        high_flat = high.view(b * t, c_high, h_out, w_out)
+        out_flat = self.head(high_flat)
+        out = out_flat.view(b, t, self.out_channels, h_out, w_out)
 
         return {
             "out": out,

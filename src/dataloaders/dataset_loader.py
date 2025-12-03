@@ -75,6 +75,9 @@ class ImageDataset(Dataset):
             assert 0
         if self._rgb_diff and self._frames_in!=2:
             raise ValueError('rgb_diff=True supported only with frames_in=2')
+        self._output_temporal = False
+        if 'dataset' in cfg and 'sequence' in cfg['dataset']:
+            self._output_temporal = cfg['dataset']['sequence'].get('output_temporal', False)
 
     def __len__(self):
         return len(self._dataset)
@@ -185,6 +188,17 @@ class ImageDataset(Dataset):
             hms_t[scale] = torch.cat(hms_t[scale], dim=0)
         if self._seq_transform is not None:
             imgs_t, hms_t = self._seq_transform(imgs_t, hms_t)
+        if self._output_temporal:
+            if imgs_t.dim()!=3:
+                raise ValueError('expected imgs_t to be 3D tensor but {} dims given'.format(imgs_t.dim()))
+            c_total, h, w = imgs_t.shape
+            if c_total % self._frames_in!=0:
+                raise ValueError('frames_in {} is not a divisor of channel dimension {}'.format(self._frames_in, c_total))
+            t = self._frames_in
+            c = c_total // t
+            # imgs_t: [T*C, H, W] -> [T, C, H, W]
+            imgs_t = imgs_t.view(t, c, h, w)
+            # hms_t[scale] は元から [T, 1, H_out, W_out] なのでそのまま使う
         xys   = torch.tensor(xys)
         visis = torch.tensor(visis)
         if self._is_train:

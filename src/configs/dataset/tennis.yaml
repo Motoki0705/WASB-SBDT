@@ -3,6 +3,11 @@ ext: '.jpg'
 root_dir: /root/repos/tennis-lab/data/tennis
 csv_filename: 'Label.csv'
 visible_flags: [1,2]
+
+visibility:
+  mode: "none" # any_visible, all_visible, none
+sequence:
+  output_temporal: true
 train:
   matches: [ 'game1', 
              'game2', 

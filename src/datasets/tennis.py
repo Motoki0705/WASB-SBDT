@@ -45,6 +45,9 @@ class Tennis(object):
         self._ext                  = cfg['dataset']['ext']
         self._csv_filename         = cfg['dataset']['csv_filename']
         self._visible_flags        = cfg['dataset']['visible_flags']
+        self._visibility_mode      = 'none'
+        if 'visibility' in cfg['dataset']:
+            self._visibility_mode = cfg['dataset']['visibility'].get('mode', 'none')
         self._train_matches        = cfg['dataset']['train']['matches']
         self._test_matches         = cfg['dataset']['test']['matches']
         self._train_num_clip_ratio = cfg['dataset']['train']['num_clip_ratio']
@@ -198,6 +201,24 @@ class Tennis(object):
                     names = frame_names[i:i+self._frames_in]
                     paths = [ osp.join(clip_frame_dir, name) for name in names]
                     annos = [ ball_xyvs[j] for j in range(i+self._frames_in-self._frames_out, i+self._frames_in)]
+                    keep = True
+                    if self._visibility_mode == 'any_visible':
+                        keep = False
+                        for anno in annos:
+                            if anno['center'].is_visible:
+                                keep = True
+                                break
+                    elif self._visibility_mode == 'all_visible':
+                        for anno in annos:
+                            if not anno['center'].is_visible:
+                                keep = False
+                                break
+                    elif self._visibility_mode != 'none':
+                        raise ValueError('unknown visibility mode : {}'.format(self._visibility_mode))
+
+                    if not keep:
+                        continue
+
                     seq_list.append( {'frames': paths, 'annos': annos, 'match': match, 'clip': clip_name})
                     if i%self._step==0:
                         clip_seq_list.append( {'frames': paths, 'annos': annos, 'match': match, 'clip': clip_name})
