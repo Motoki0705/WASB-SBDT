@@ -1,27 +1,57 @@
 name: hrcnet
-frames_in: 3
-frames_out: 3
-inp_height: 288
-inp_width: 512
-out_height: 288
-out_width: 512
-rgb_diff: False
-out_scales: [0]
 
-# HRCNet-specific hyperparameters
+# === HRCNet core ===
+in_channels: 3
+out_channels: 1
 high_channels: 64
 low_channels: 64
+
 num_stages: 3
+high_block: "DW_BASIC"   # "BASIC" / "DW_BASIC" / "BOTTLENECK"
+low_block: "DW_BASIC"
 num_high_blocks: 2
 num_low_blocks: 1
-upsample_mode: nearest
+upsample_mode: "nearest"
 
+# Common settings (currently constants, but can be overridden here if needed)
+bn_momentum: 0.1
+
+# === Downsample (MobileNetV3Downsample) ===
 downsample:
-  num_downsample: 4
+  type: "mobilenetv3"    # Placeholder to support other downsamplers in the future
+  num_blocks: 4          # / 2^4 = 1/16 resolution
+  expand_ratio: 4.0
+  use_se: true
+  se_reduction: 4
+  activation: "hswish"
 
-transformer:
-  d_model: 64
+# === Spatial Transformer (spatial transformer on the low branch) ===
+spatial_transformer:
+  d_model: 64            # should match low_channels
   num_heads: 8
   dim_ff: 256
   dropout: 0.1
   depth: 2
+
+# === Temporal Module ===
+temporal:
+  type: "transformer"    # "none" / "tsm" / "conv1d" / "convgru" / "transformer"
+
+  # Per-type sub-configuration (only the selected type is used)
+  tsm:
+    shift_div: 8
+
+  conv1d:
+    kernel_size: 3
+    num_layers: 1
+    dilation: 1
+
+  convgru:
+    hidden_channels: null   # if null, defaults to channels
+    kernel_size: 3
+
+  transformer:
+    num_heads: 8
+    dim_ff: 256
+    dropout: 0.1
+    depth: 2

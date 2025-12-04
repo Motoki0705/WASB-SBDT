@@ -5,7 +5,7 @@ csv_filename: 'Label.csv'
 visible_flags: [1,2]
 
 visibility:
-  mode: "none" # any_visible, all_visible, none
+  mode: "all_visible" # any_visible, all_visible, none
 sequence:
   output_temporal: true
 train:

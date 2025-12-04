@@ -29,30 +29,53 @@ def build_model(cfg):
     elif model_name=='higher_hrnet' or model_name=='cls_hrnet' or model_name=='hrnet':
         model = __factory[model_name](cfg['model'])
     elif model_name=='hrcnet':
-        mcfg = cfg['model']
-        frames_in  = mcfg['frames_in']
-        frames_out = mcfg['frames_out']
-        high_channels = mcfg['high_channels']
-        low_channels  = mcfg['low_channels']
-        num_stages    = mcfg.get('num_stages', 3)
-        num_high      = mcfg.get('num_high_blocks', 2)
-        num_low       = mcfg.get('num_low_blocks', 1)
-        upsample_mode = mcfg.get('upsample_mode', 'nearest')
-        down_kwargs   = mcfg.get('downsample', {})
-        tt = mcfg.get('transformer', {})
-        model = __factory[model_name](
-            in_channels=frames_in*3,
-            out_channels=frames_out,
+        mcfg = cfg["model"]
+        in_channels = mcfg["in_channels"]
+        out_channels = mcfg["out_channels"]
+        high_channels = mcfg["high_channels"]
+        low_channels = mcfg["low_channels"]
+
+        num_stages = mcfg["num_stages"]
+        high_block = mcfg["high_block"]
+        low_block = mcfg["low_block"]
+        num_high_blocks = mcfg["num_high_blocks"]
+        num_low_blocks = mcfg["num_low_blocks"]
+        upsample_mode = mcfg["upsample_mode"]
+        down_cfg = mcfg.get("downsample", {})
+        downsample_kwargs = {
+            "num_blocks": down_cfg.get("num_blocks", 4),
+            "expand_ratio": down_cfg.get("expand_ratio", 4.0),
+            "use_se": down_cfg.get("use_se", True),
+            "se_reduction": down_cfg.get("se_reduction", 4),
+            "activation": down_cfg.get("activation", "hswish"),
+            "bn_momentum": mcfg.get("bn_momentum", 0.1),
+        }
+        st_cfg = mcfg.get("spatial_transformer", {})
+        transformer_kwargs = {
+            "d_model": st_cfg.get("d_model", low_channels),
+            "num_heads": st_cfg.get("num_heads", 8),
+            "dim_ff": st_cfg.get("dim_ff", st_cfg.get("d_model", low_channels) * 4),
+            "dropout": st_cfg.get("dropout", 0.1),
+            "depth": st_cfg.get("depth", 2),
+        }
+        temporal_cfg = mcfg.get("temporal", {})
+        temporal_type = temporal_cfg.get("type", "transformer")
+        temporal_kwargs = temporal_cfg.get(temporal_type, {})
+        model = HRCNetForWASB(
+            in_channels=in_channels,
+            out_channels=out_channels,
             high_channels=high_channels,
             low_channels=low_channels,
             num_stages=num_stages,
-            high_block='BASIC',
-            low_block='BASIC',
-            num_high_blocks=num_high,
-            num_low_blocks=num_low,
+            high_block=high_block,
+            low_block=low_block,
+            num_high_blocks=num_high_blocks,
+            num_low_blocks=num_low_blocks,
             upsample_mode=upsample_mode,
-            downsample_kwargs=down_kwargs,
-            transformer_kwargs=tt,
+            downsample_kwargs=downsample_kwargs,
+            transformer_kwargs=transformer_kwargs,
+            temporal_type=temporal_type,
+            temporal_kwargs=temporal_kwargs,
         )
     elif model_name=='restracknetv2':
         frames_in        = cfg['model']['frames_in']

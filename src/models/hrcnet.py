@@ -85,86 +85,506 @@ class Bottleneck(nn.Module):
         return out
 
 
-_BLOCKS = {
-    "BASIC": BasicBlock,
-    "BOTTLENECK": Bottleneck,
-}
+class DepthwiseBasicBlock(nn.Module):
+    """Depthwise separable version of BasicBlock.
 
+    Interface is compatible with BasicBlock:
+        - inplanes: input channels
+        - planes: output channels
+        - stride: spatial stride for the first conv
+        - downsample: optional residual projection
 
-class MobileNetDownsample(nn.Module):
+    Note:
+        As with BasicBlock, if stride != 1 or inplanes != planes,
+        the caller is responsible for providing `downsample`.
+    """
+
+    expansion = 1
+
     def __init__(
         self,
-        in_ch: int,
-        out_ch: int,
-        num_downsample: int = 4,
+        inplanes: int,
+        planes: int,
+        stride: int = 1,
+        downsample: Optional[nn.Module] = None,
         bn_momentum: float = BN_MOMENTUM,
     ) -> None:
         super().__init__()
 
+        # 1st depthwise + pointwise
+        self.dw_conv1 = nn.Conv2d(
+            inplanes,
+            inplanes,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            groups=inplanes,
+            bias=False,
+        )
+        self.pw_conv1 = nn.Conv2d(
+            inplanes,
+            planes,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=False,
+        )
+        self.bn1 = nn.BatchNorm2d(planes, momentum=bn_momentum)
+
+        # 2nd depthwise + pointwise
+        self.dw_conv2 = nn.Conv2d(
+            planes,
+            planes,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            groups=planes,
+            bias=False,
+        )
+        self.pw_conv2 = nn.Conv2d(
+            planes,
+            planes,
+            kernel_size=1,
+            stride=1,
+            padding=0,
+            bias=False,
+        )
+        self.bn2 = nn.BatchNorm2d(planes, momentum=bn_momentum)
+
+        self.relu = nn.ReLU(inplace=True)
+        self.downsample = downsample
+        self.stride = stride
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        residual = x
+
+        out = self.dw_conv1(x)
+        out = self.pw_conv1(out)
+        out = self.bn1(out)
+        out = self.relu(out)
+
+        out = self.dw_conv2(out)
+        out = self.pw_conv2(out)
+        out = self.bn2(out)
+
+        if self.downsample is not None:
+            residual = self.downsample(x)
+
+        out += residual
+        out = self.relu(out)
+
+        return out
+
+
+_BLOCKS = {
+    "BASIC": BasicBlock,
+    "DW_BASIC": DepthwiseBasicBlock,
+    "BOTTLENECK": Bottleneck,
+}
+
+
+class TemporalModule(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError
+
+
+class IdentityTemporal(TemporalModule):
+    def __init__(self, channels: int, **kwargs: Any) -> None:
+        super().__init__()
+        self.channels = channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x
+
+
+class TSMTemporal(TemporalModule):
+    def __init__(self, channels: int, shift_div: int = 8, **kwargs: Any) -> None:
+        super().__init__()
+        self.channels = channels
+        self.shift_div = shift_div
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, C, H, W)
+        b, t, c, h, w = x.shape
+        fold = c // self.shift_div
+        if fold == 0:
+            return x
+
+        out = torch.zeros_like(x)
+        # shift part of channels backward (to t-1)
+        out[:, 1:, :fold] = x[:, :-1, :fold]
+        # shift part of channels forward (to t+1)
+        out[:, :-1, fold : 2 * fold] = x[:, 1:, fold : 2 * fold]
+        # remaining channels stay in place
+        out[:, :, 2 * fold :] = x[:, :, 2 * fold :]
+        return out
+
+
+class TemporalConv1D(TemporalModule):
+    def __init__(
+        self,
+        channels: int,
+        kernel_size: int = 3,
+        num_layers: int = 1,
+        dilation: int = 1,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__()
+
         layers: list[nn.Module] = []
-        in_channels = in_ch
-        if in_ch != out_ch:
+        in_channels = channels
+        padding = (kernel_size - 1) // 2 * dilation
+        for _ in range(max(num_layers, 1)):
+            layers.append(
+                nn.Conv1d(
+                    in_channels,
+                    in_channels,
+                    kernel_size=kernel_size,
+                    padding=padding,
+                    groups=in_channels,
+                    dilation=dilation,
+                    bias=False,
+                )
+            )
+            layers.append(nn.Conv1d(in_channels, in_channels, kernel_size=1, bias=False))
+            layers.append(nn.ReLU(inplace=True))
+        self.conv = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, C, H, W)
+        b, t, c, h, w = x.shape
+        x_tmp = x.permute(0, 3, 4, 2, 1).contiguous().view(b * h * w, c, t)
+        x_tmp = self.conv(x_tmp)
+        x_tmp = x_tmp.view(b, h, w, c, t).permute(0, 4, 3, 1, 2)
+        return x_tmp
+
+
+class ConvGRUTemporal(TemporalModule):
+    def __init__(
+        self,
+        channels: int,
+        hidden_channels: Optional[int] = None,
+        kernel_size: int = 3,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__()
+        if hidden_channels is None:
+            hidden_channels = channels
+        self.channels = channels
+        self.hidden_channels = hidden_channels
+
+        padding = kernel_size // 2
+        self.conv_zr = nn.Conv2d(
+            channels + hidden_channels,
+            2 * hidden_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+        self.conv_h = nn.Conv2d(
+            channels + hidden_channels,
+            hidden_channels,
+            kernel_size=kernel_size,
+            padding=padding,
+        )
+
+        if hidden_channels != channels:
+            self.proj_out = nn.Conv2d(hidden_channels, channels, kernel_size=1)
+        else:
+            self.proj_out = None
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (B, T, C, H, W)
+        b, t, c, h, w = x.shape
+        h_state: Optional[torch.Tensor] = None
+        outputs = []
+        for i in range(t):
+            x_t = x[:, i]
+            if h_state is None:
+                h_state = torch.zeros(
+                    b,
+                    self.hidden_channels,
+                    h,
+                    w,
+                    device=x.device,
+                    dtype=x.dtype,
+                )
+            combined = torch.cat([x_t, h_state], dim=1)
+            zr = self.conv_zr(combined)
+            z, r = torch.sigmoid(zr.chunk(2, dim=1))
+            combined_r = torch.cat([x_t, r * h_state], dim=1)
+            h_tilde = torch.tanh(self.conv_h(combined_r))
+            h_state = (1.0 - z) * h_state + z * h_tilde
+            outputs.append(h_state.unsqueeze(1))
+
+        out = torch.cat(outputs, dim=1)
+        if self.proj_out is not None:
+            out = self.proj_out(out.view(b * t, self.hidden_channels, h, w)).view(
+                b, t, self.channels, h, w
+            )
+        return out
+
+
+class TransformerTemporal(TemporalModule):
+    def __init__(
+        self,
+        channels: int,
+        num_heads: int = 8,
+        dim_ff: Optional[int] = None,
+        dropout: float = 0.1,
+        depth: int = 2,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__()
+
+        d_model = channels
+        if dim_ff is None:
+            dim_ff = d_model * 4
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=num_heads,
+            dim_feedforward=dim_ff,
+            dropout=dropout,
+            activation="gelu",
+            batch_first=True,
+            norm_first=True,
+            **kwargs,
+        )
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=depth,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        b, t, c, h, w = x.shape
+        x_tmp = x.permute(0, 3, 4, 1, 2)
+        seq = x_tmp.reshape(b * h * w, t, c)
+        seq = self.encoder(seq)
+        x_tmp = seq.view(b, h, w, t, c)
+        x = x_tmp.permute(0, 3, 4, 1, 2)
+        return x
+
+
+def build_temporal_module(
+    temporal_type: str,
+    channels: int,
+    **kwargs: Any,
+) -> TemporalModule:
+    if temporal_type == "none":
+        return IdentityTemporal(channels=channels, **kwargs)
+    if temporal_type == "tsm":
+        return TSMTemporal(channels=channels, **kwargs)
+    if temporal_type == "conv1d":
+        return TemporalConv1D(channels=channels, **kwargs)
+    if temporal_type == "convgru":
+        return ConvGRUTemporal(channels=channels, **kwargs)
+    if temporal_type == "transformer":
+        return TransformerTemporal(channels=channels, **kwargs)
+    raise ValueError(f"Unknown temporal_type '{temporal_type}'.")
+
+class HSigmoid(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return F.relu6(x + 3.0, inplace=True) / 6.0
+
+
+class HSwish(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x * (F.relu6(x + 3.0, inplace=True) / 6.0)
+
+
+def _make_activation(name: str) -> nn.Module:
+    name = name.lower()
+    if name in ("relu", "relu6"):
+        return nn.ReLU(inplace=True)
+    if name in ("hswish", "h-swish"):
+        return HSwish()
+    raise ValueError(f"Unknown activation '{name}'.")
+
+class SqueezeExcitation(nn.Module):
+    """Squeeze-and-Excitation block used in MobileNetV3."""
+
+    def __init__(
+        self,
+        channels: int,
+        reduction: int = 4,
+        activation: str = "relu",
+    ) -> None:
+        super().__init__()
+        hidden = max(channels // reduction, 1)
+        self.avg_pool = nn.AdaptiveAvgPool2d(1)
+        self.fc1 = nn.Conv2d(channels, hidden, kernel_size=1, bias=True)
+        self.act = _make_activation(activation)
+        self.fc2 = nn.Conv2d(hidden, channels, kernel_size=1, bias=True)
+        self.gate = HSigmoid()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        scale = self.avg_pool(x)
+        scale = self.fc1(scale)
+        scale = self.act(scale)
+        scale = self.fc2(scale)
+        scale = self.gate(scale)
+        return x * scale
+
+class InvertedResidualV3(nn.Module):
+    """MobileNetV3-style inverted residual block with optional SE."""
+
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        stride: int,
+        expand_ratio: float = 4.0,
+        use_se: bool = True,
+        se_reduction: int = 4,
+        activation: str = "hswish",
+        bn_momentum: float = BN_MOMENTUM,
+    ) -> None:
+        super().__init__()
+        if stride not in (1, 2):
+            raise ValueError(f"stride must be 1 or 2, got {stride}.")
+
+        hidden_dim = int(round(in_ch * expand_ratio))
+        self.use_res_connect = (stride == 1) and (in_ch == out_ch)
+
+        layers: list[nn.Module] = []
+
+        # 1x1 pointwise conv (expand)
+        if hidden_dim != in_ch:
             layers.append(
                 nn.Conv2d(
                     in_ch,
-                    out_ch,
+                    hidden_dim,
                     kernel_size=1,
                     stride=1,
                     padding=0,
                     bias=False,
                 )
             )
-            layers.append(nn.BatchNorm2d(out_ch, momentum=bn_momentum))
-            layers.append(nn.ReLU(inplace=True))
-            in_channels = out_ch
+            layers.append(nn.BatchNorm2d(hidden_dim, momentum=bn_momentum))
+            layers.append(_make_activation(activation))
 
-        for _ in range(max(num_downsample, 0)):
+        # 3x3 depthwise conv
+        layers.append(
+            nn.Conv2d(
+                hidden_dim,
+                hidden_dim,
+                kernel_size=3,
+                stride=stride,
+                padding=1,
+                groups=hidden_dim,
+                bias=False,
+            )
+        )
+        layers.append(nn.BatchNorm2d(hidden_dim, momentum=bn_momentum))
+        layers.append(_make_activation(activation))
+
+        # SE
+        if use_se:
             layers.append(
-                nn.Conv2d(
-                    in_channels,
-                    in_channels,
-                    kernel_size=3,
-                    stride=2,
-                    padding=1,
-                    groups=in_channels,
-                    bias=False,
+                SqueezeExcitation(
+                    channels=hidden_dim,
+                    reduction=se_reduction,
+                    activation="relu",
                 )
             )
-            layers.append(nn.BatchNorm2d(in_channels, momentum=bn_momentum))
-            layers.append(nn.ReLU(inplace=True))
+
+        # 1x1 pointwise conv (project, linear)
+        layers.append(
+            nn.Conv2d(
+                hidden_dim,
+                out_ch,
+                kernel_size=1,
+                stride=1,
+                padding=0,
+                bias=False,
+            )
+        )
+        layers.append(nn.BatchNorm2d(out_ch, momentum=bn_momentum))
+
+        self.block = nn.Sequential(*layers)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        out = self.block(x)
+        if self.use_res_connect:
+            out = out + x
+        return out
+
+class MobileNetV3Downsample(nn.Module):
+    """Downsampling stack using MobileNetV3-style inverted residual blocks.
+
+    Each block uses stride=2, so spatial size is reduced by 2**num_blocks.
+    """
+
+    def __init__(
+        self,
+        in_ch: int,
+        out_ch: int,
+        num_blocks: int = 4,
+        expand_ratio: float = 4.0,
+        use_se: bool = True,
+        se_reduction: int = 4,
+        activation: str = "hswish",
+        bn_momentum: float = BN_MOMENTUM,
+    ) -> None:
+        super().__init__()
+
+        if num_blocks < 1:
+            raise ValueError("num_blocks must be >= 1 for MobileNetV3Downsample.")
+
+        layers: list[nn.Module] = []
+        current_in = in_ch
+
+        for i in range(num_blocks):
+            # 最初のブロックで in_ch -> out_ch に合わせる
+            current_out = out_ch
+            layers.append(
+                InvertedResidualV3(
+                    in_ch=current_in,
+                    out_ch=current_out,
+                    stride=2,
+                    expand_ratio=expand_ratio,
+                    use_se=use_se,
+                    se_reduction=se_reduction,
+                    activation=activation,
+                    bn_momentum=bn_momentum,
+                )
+            )
+            current_in = current_out
 
         self.down = nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.down(x)
 
-
 class ContextFusionBlock(nn.Module):
     """Two-resolution fusion block with repeated high/low interaction.
 
-    This block updates a high-resolution branch (H, W) and a low-resolution
-    branch (H_low, W_low) and lets them exchange information in both directions:
+    This block updates a high-resolution spatiotemporal branch and a
+    low-resolution spatiotemporal branch and lets them exchange information
+    in both directions:
 
     1. High branch is updated by a stack of residual blocks.
     2. Low branch is updated by a stack of residual blocks and a transformer encoder.
     3. Low → High: low is upsampled and projected, then added to high.
     4. High → Low: high is pooled and projected, then added to low.
-
     The shapes must satisfy:
-        high: (B, C_high, H, W)
-        low : (B, C_low,  H_low, W_low)
+
+        high: (B, T, C_high, H, W)
+        low : (B, T, C_low,  H_low, W_low)
     """
 
     def __init__(
         self,
         high_channels: int,
         low_channels: int,
-        high_block: str = "BASIC",
-        low_block: str = "BASIC",
+        high_block: str = "DW_BASIC",
+        low_block: str = "DW_BASIC",
         num_high_blocks: int = 2,
         num_low_blocks: int = 1,
         upsample_mode: str = "nearest",
         transformer_kwargs: Optional[Dict[str, Any]] = None,
+        temporal_type: str = "transformer",
+        temporal_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__()
 
@@ -216,19 +636,20 @@ class ContextFusionBlock(nn.Module):
             num_layers=depth,
         )
 
-        encoder_layer_temporal = nn.TransformerEncoderLayer(
-            d_model=d_model,
-            nhead=num_heads,
-            dim_feedforward=dim_ff,
-            dropout=dropout,
-            activation="gelu",
-            batch_first=True,
-            norm_first=True,
+        temporal_kwargs_all: Dict[str, Any] = {
+            "num_heads": num_heads,
+            "dim_ff": dim_ff,
+            "dropout": dropout,
+            "depth": depth,
             **t_kwargs,
-        )
-        self.temporal_transformer = nn.TransformerEncoder(
-            encoder_layer_temporal,
-            num_layers=depth,
+        }
+        if temporal_kwargs is not None:
+            temporal_kwargs_all.update(temporal_kwargs)
+
+        self.temporal = build_temporal_module(
+            temporal_type=temporal_type,
+            channels=low_channels,
+            **temporal_kwargs_all,
         )
 
         self.low_to_high = nn.Sequential(
@@ -251,8 +672,10 @@ class ContextFusionBlock(nn.Module):
         """Run one fusion step.
 
         Args:
-            high: High-resolution feature map, shape (B, C_high, H, W).
-            low: Low-resolution feature map, shape (B, C_low, H_low, W_low).
+            high: High-resolution feature sequence,
+                shape (B, T, C_high, H, W).
+            low: Low-resolution feature sequence,
+                shape (B, T, C_low, H_low, W_low).
 
         Returns:
             Tuple of updated (high, low) feature maps with the same shapes as inputs.
@@ -260,7 +683,6 @@ class ContextFusionBlock(nn.Module):
         # Expect high: (B, T, C_high, H, W), low: (B, T, C_low, H_low, W_low)
         b, t, c_high, h, w = high.shape
         _, _, c_low, h_low, w_low = low.shape
-
         high_flat = high.view(b * t, c_high, h, w)
         low_flat = low.view(b * t, c_low, h_low, w_low)
 
@@ -274,11 +696,7 @@ class ContextFusionBlock(nn.Module):
         low_spatial = self.spatial_transformer(low_spatial)
         low = low_spatial.permute(0, 2, 1).view(b, t, c_low, h_low, w_low)
 
-        low_tmp = low.permute(0, 3, 4, 1, 2)
-        low_seq = low_tmp.reshape(b * h_low * w_low, t, c_low)
-        low_seq = self.temporal_transformer(low_seq)
-        low_tmp = low_seq.view(b, h_low, w_low, t, c_low)
-        low = low_tmp.permute(0, 3, 4, 1, 2)
+        low = self.temporal(low)
 
         high_flat = high.view(b * t, c_high, h, w)
         low_flat = low.reshape(b * t, c_low, h_low, w_low)
@@ -323,13 +741,15 @@ class HRCNet(nn.Module):
         high_channels: int,
         low_channels: int,
         num_stages: int = 3,
-        high_block: str = "BASIC",
-        low_block: str = "BASIC",
+        high_block: str = "DW_BASIC",
+        low_block: str = "DW_BASIC",
         num_high_blocks: int = 2,
         num_low_blocks: int = 1,
         upsample_mode: str = "nearest",
         downsample_kwargs: Optional[Dict[str, Any]] = None,
         transformer_kwargs: Optional[Dict[str, Any]] = None,
+        temporal_type: str = "transformer",
+        temporal_kwargs: Optional[Dict[str, Any]] = None,
     ) -> None:
         super().__init__()
 
@@ -365,7 +785,7 @@ class HRCNet(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        self.initial_down = MobileNetDownsample(
+        self.initial_down = MobileNetV3Downsample(
             in_ch=high_channels,
             out_ch=low_channels,
             **(downsample_kwargs or {}),
@@ -383,6 +803,8 @@ class HRCNet(nn.Module):
                     num_low_blocks=num_low_blocks,
                     upsample_mode=upsample_mode,
                     transformer_kwargs=transformer_kwargs,
+                    temporal_type=temporal_type,
+                    temporal_kwargs=temporal_kwargs,
                 )
             )
         self.stages = nn.ModuleList(stages)
@@ -414,13 +836,16 @@ class HRCNet(nn.Module):
         """Run the HRCNet forward pass.
 
         Args:
-            x: Input tensor of shape (B, in_channels, H, W).
+            x: Input tensor of shape (B, T, in_channels, H, W).
 
         Returns:
             Dict with:
-                - "out": high-resolution output, shape (B, out_channels, H, W)
-                - "high": final high-resolution features
-                - "low": final low-resolution features
+                - "out": high-resolution output sequence,
+                    shape (B, T, out_channels, H, W)
+                - "high": final high-resolution features,
+                    shape (B, T, C_high, H, W)
+                - "low": final low-resolution features,
+                    shape (B, T, C_low, H_low, W_low)
         """
         if x.dim() != 5:
             raise ValueError(f"Expected 5D input (B, T, C, H, W), got shape {x.shape}.")
@@ -459,11 +884,3 @@ class HRCNetForWASB(HRCNet):
     def forward(self, x: torch.Tensor) -> Dict[int, torch.Tensor]:
         outputs = super().forward(x)
         return {0: outputs["out"]}
-
-if __name__ == '__main__':
-    inputs = torch.rand(4, 3, 3, 288, 512).cuda()
-    model = HRCNet(in_channels=3, out_channels=1, high_channels=64, low_channels=64).cuda()
-    with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
-        for _ in range(10):
-            outputs = model(inputs)
-            print(outputs['out'].shape)
