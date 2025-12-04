@@ -281,7 +281,7 @@ class ContextFusionBlock(nn.Module):
         low = low_tmp.permute(0, 3, 4, 1, 2)
 
         high_flat = high.view(b * t, c_high, h, w)
-        low_flat = low.view(b * t, c_low, h_low, w_low)
+        low_flat = low.reshape(b * t, c_low, h_low, w_low)
 
         low_up = F.interpolate(low_flat, size=(h, w), mode=self.upsample_mode)
         low_up = self.low_to_high(low_up)
@@ -337,7 +337,7 @@ class HRCNet(nn.Module):
             raise ValueError("num_stages must be >= 1.")
 
         self.in_channels = 3
-        self.out_channels = out_channels
+        self.out_channels = 1
         self.high_channels = high_channels
         self.low_channels = low_channels
         self.num_stages = num_stages
@@ -389,7 +389,7 @@ class HRCNet(nn.Module):
 
         self.head = nn.Conv2d(
             high_channels,
-            out_channels,
+            self.out_channels,
             kernel_size=1,
             stride=1,
             padding=0,
@@ -460,14 +460,10 @@ class HRCNetForWASB(HRCNet):
         outputs = super().forward(x)
         return {0: outputs["out"]}
 
-
-if __name__ == "__main__":
-    inputs = torch.rand(1, 3, 256, 256)
-    model = HRCNet(
-        in_channels=3,
-        out_channels=1,
-        high_channels=64,
-        low_channels=64,
-    )
-    outputs = model(inputs)
-    print(outputs)
+if __name__ == '__main__':
+    inputs = torch.rand(4, 3, 3, 288, 512).cuda()
+    model = HRCNet(in_channels=3, out_channels=1, high_channels=64, low_channels=64).cuda()
+    with torch.amp.autocast(device_type='cuda', dtype=torch.float16):
+        for _ in range(10):
+            outputs = model(inputs)
+            print(outputs['out'].shape)

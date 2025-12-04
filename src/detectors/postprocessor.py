@@ -100,7 +100,12 @@ class TracknetV2Postprocessor(object):
         for scale in self._scales:
             preds_       = preds[scale]
             affine_mats_ = affine_mats[scale].cpu().numpy()
-            hms_         = preds_.sigmoid_().cpu().numpy()           
+            hms_         = preds_.sigmoid_().cpu().numpy()
+
+            # Support both 4D (B, S, H, W) and 5D (B, T, C, H, W) outputs
+            if hms_.ndim == 5:
+                b, t, c, h, w = hms_.shape
+                hms_ = hms_.reshape(b, t * c, h, w)
 
             b,s,h,w = hms_.shape
             for i in range(b):

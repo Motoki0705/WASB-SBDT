@@ -198,7 +198,9 @@ class ImageDataset(Dataset):
             c = c_total // t
             # imgs_t: [T*C, H, W] -> [T, C, H, W]
             imgs_t = imgs_t.view(t, c, h, w)
-            # hms_t[scale] は元から [T, 1, H_out, W_out] なのでそのまま使う
+            for scale in self._out_scales:
+                if hms_t[scale].dim()==3:
+                    hms_t[scale] = hms_t[scale].unsqueeze(1)
         xys   = torch.tensor(xys)
         visis = torch.tensor(visis)
         if self._is_train:

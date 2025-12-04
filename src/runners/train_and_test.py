@@ -116,6 +116,9 @@ class Trainer(BaseRunner):
         if self._use_fp16:
             log.info('FP16 mixed precision training enabled')
 
+        # gradient accumulation
+        self._grad_accum_steps = cfg['runner'].get('grad_accum_steps', 1)
+
     def run(self):
 
         if self._test_before_train:
@@ -140,7 +143,8 @@ class Trainer(BaseRunner):
                                         self._optimizer, 
                                         self._device,
                                         use_fp16=self._use_fp16,
-                                        scaler=self._scaler
+                                        scaler=self._scaler,
+                                        grad_accum_steps=self._grad_accum_steps,
                             )
 
             is_best = False

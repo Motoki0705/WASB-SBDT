@@ -40,7 +40,9 @@ class BCELoss(nn.Module):
             #print(inputs[scale].shape, targets[scale].shape)
             #loss = ((1-inputs[scale])**2) * targets[scale] * torch.log(inputs[scale]) + (inputs[scale]**2) * (1-targets[scale]) * torch.log(1-inputs[scale])
             #loss = torch.mean(-loss)
-            loss = self._loss_func(inputs[scale], targets[scale])
+            # BCELoss / binary_cross_entropy は autocast 下では unsafe なので、ここだけ autocast を無効化し float32 で計算する
+            with torch.amp.autocast(enabled=False, device_type='cuda'):
+                loss = self._loss_func(inputs[scale].float(), targets[scale].float())
             if self._auto_weight:
                 loss_acc += loss * torch.exp(-self._ws['loss_w_s{}'.format(scale)]) + self._ws['loss_w_s{}'.format(scale)]
             else:

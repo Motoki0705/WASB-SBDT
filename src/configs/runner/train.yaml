@@ -2,6 +2,7 @@ name: train
 device: cuda
 gpus: [0]
 max_epochs: 30
+grad_accum_steps: 16
 fp16: true
 
 test:

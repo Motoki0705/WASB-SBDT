@@ -15,32 +15,48 @@ from utils import save_checkpoint, AverageMeter
 
 log = logging.getLogger(__name__)
 
-def train_epoch(epoch, model, train_loader, loss_criterion, optimizer, device, use_fp16=False, scaler=None):
+def train_epoch(epoch, model, train_loader, loss_criterion, optimizer, device, use_fp16=False, scaler=None, grad_accum_steps: int = 1):
     batch_loss = AverageMeter()
     model.train()
     t_start = time.time()
+
+    if grad_accum_steps < 1:
+        raise ValueError(f'grad_accum_steps must be >= 1, got {grad_accum_steps}')
+
+    optimizer.zero_grad()
+
+    num_batches = len(train_loader)
+
     for batch_idx, (imgs, hms) in enumerate(tqdm(train_loader, desc='[(TRAIN) Epoch {}]'.format(epoch)) ):
 
         imgs = imgs.to(device, non_blocking=True)
         for scale, hm in hms.items():
             hms[scale] = hm.to(device, non_blocking=True)
 
-        optimizer.zero_grad()
-
         if use_fp16 and scaler is not None:
-            with autocast(dtype=torch.float16):
+            with torch.amp.autocast(device_type=device, dtype=torch.float16):
                 preds = model(imgs)
-                loss  = loss_criterion(preds, hms)
+                loss_raw  = loss_criterion(preds, hms)
+                loss = loss_raw / grad_accum_steps
             scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
         else:
             preds = model(imgs)
-            loss  = loss_criterion(preds, hms)
+            loss_raw  = loss_criterion(preds, hms)
+            loss = loss_raw / grad_accum_steps
             loss.backward()
-            optimizer.step()
 
-        batch_loss.update(loss.item(), preds[0].size(0))
+        batch_loss.update(loss_raw.item(), preds[0].size(0))
+
+        is_accum_step = ((batch_idx + 1) % grad_accum_steps == 0) or ((batch_idx + 1) == num_batches)
+
+        if is_accum_step:
+            if use_fp16 and scaler is not None:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+            optimizer.zero_grad()
+
     t_elapsed = time.time() - t_start
 
     log.info('(TRAIN) Epoch {epoch} Loss:{batch_loss.avg:.6f} Time:{time:.1f}(sec)'.format(epoch=epoch, batch_loss=batch_loss, time=t_elapsed))
