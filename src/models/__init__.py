@@ -5,6 +5,7 @@ from .hrnet import HRNet
 from .deepball import DeepBall
 from .ballseg import BallSeg
 from .hrcnet import HRCNetForWASB
+from .dw3dconv import DW3DConvForWASB
 
 __factory = {
     'tracknetv2': TrackNetV2,
@@ -12,6 +13,7 @@ __factory = {
     'restracknetv2': ChangsTrackNet,
     'hrnet': HRNet,
     'hrcnet': HRCNetForWASB,
+    'dw3dconv': DW3DConvForWASB,
     'deepball': DeepBall,
     'ballseg': BallSeg
         }
@@ -76,6 +78,22 @@ def build_model(cfg):
             transformer_kwargs=transformer_kwargs,
             temporal_type=temporal_type,
             temporal_kwargs=temporal_kwargs,
+        )
+    elif model_name=='dw3dconv':
+        mcfg = cfg["model"]
+        in_channels = mcfg["in_channels"]
+        out_channels = mcfg["out_channels"]
+        depths = tuple(mcfg.get("depths", [2, 2, 8, 2]))
+        channels = tuple(mcfg.get("channels", [32, 64, 128, 256]))
+        num_spatial_stages = mcfg.get("num_spatial_stages", None)
+        bottleneck_depth = mcfg.get("bottleneck_depth", 2)
+        model = DW3DConvForWASB(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            depths=depths,
+            channels=channels,
+            num_spatial_stages=num_spatial_stages,
+            bottleneck_depth=bottleneck_depth,
         )
     elif model_name=='restracknetv2':
         frames_in        = cfg['model']['frames_in']

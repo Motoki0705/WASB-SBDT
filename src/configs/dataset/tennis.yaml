@@ -15,11 +15,7 @@ train:
              'game4', 
              'game5', 
              'game6',
-             'game7',
-             'game11',
-             'game12',
-             'game13',
-             'game14']
+             'game7',]
   num_clip_ratio: 1.0
   refine_npz_path: 
 test:

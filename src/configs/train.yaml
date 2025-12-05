@@ -1,7 +1,7 @@
 defaults:
   - runner: train
   - dataset: tennis
-  - model: wasb
+  - model: dw3dconv
   - dataloader: default
   - loss: hm_bce
   - optimizer: adam_multistep

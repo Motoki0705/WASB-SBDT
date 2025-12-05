@@ -100,6 +100,97 @@ def _top1(scores):
     topk_xs   = (topk_inds % width).int().float()
     return topk_scores, topk_inds, topk_ys, topk_xs
 
+def save_heatmaps(
+    preds: dict,
+    hms_gt: dict,
+    img_paths: list,
+    output_dir: str,
+    epoch: int,
+    batch_idx: int,
+    max_samples: int = 4,
+    colormap: int = cv2.COLORMAP_JET,
+):
+    """Save predicted heatmaps and ground truth heatmaps as images.
+
+    Output structure:
+        output_dir/heatmaps/epoch_{epoch}/
+        ├── seq_pred_{seq_idx}/
+        │   ├── t_00.png
+        │   ├── t_01.png
+        │   └── ...
+        ├── seq_gt_{seq_idx}/
+        │   ├── t_00.png
+        │   └── ...
+        └── seq_compare_{seq_idx}/
+            ├── t_00.png  (GT | Pred side-by-side)
+            └── ...
+
+    Args:
+        preds: Dict of predicted heatmaps {scale: Tensor[B, T, 1, H, W]}.
+        hms_gt: Dict of ground truth heatmaps {scale: Tensor[B, T, 1, H, W]}.
+        img_paths: List of input image paths (length B*T or nested).
+        output_dir: Output directory path.
+        epoch: Current epoch number.
+        batch_idx: Batch index within the epoch.
+        max_samples: Maximum number of samples to save per batch.
+        colormap: OpenCV colormap for heatmap visualization.
+    """
+    epoch_dir = osp.join(output_dir, "heatmaps", f"epoch_{epoch:03d}")
+
+    for scale, pred in preds.items():
+        # pred: [B, T, C, H, W] or [B, T, H, W]
+        pred_np = pred.detach().cpu().float()
+        if pred_np.dim() == 5:
+            pred_np = pred_np[:, :, 0]  # [B, T, H, W]
+
+        gt = hms_gt.get(scale)
+        if gt is not None:
+            gt_np = gt.detach().cpu().float()
+            if gt_np.dim() == 5:
+                gt_np = gt_np[:, :, 0]  # [B, T, H, W]
+        else:
+            gt_np = None
+
+        b, t, h, w = pred_np.shape
+        num_samples = min(b, max_samples)
+
+        for bi in range(num_samples):
+            # Global sequence index across batches
+            seq_idx = batch_idx * b + bi
+
+            # Create directories for this sequence
+            pred_dir = osp.join(epoch_dir, f"seq_pred_{seq_idx:04d}")
+            gt_dir = osp.join(epoch_dir, f"seq_gt_{seq_idx:04d}")
+            compare_dir = osp.join(epoch_dir, f"seq_compare_{seq_idx:04d}")
+
+            mkdir_if_missing(pred_dir)
+            if gt_np is not None:
+                mkdir_if_missing(gt_dir)
+                mkdir_if_missing(compare_dir)
+
+            for ti in range(t):
+                # Normalize prediction to [0, 255]
+                pred_frame = pred_np[bi, ti].numpy()
+                pred_frame = np.clip(pred_frame, 0, 1)
+                pred_frame = (pred_frame * 255).astype(np.uint8)
+                pred_colored = cv2.applyColorMap(pred_frame, colormap)
+
+                # Save prediction
+                cv2.imwrite(osp.join(pred_dir, f"t_{ti:02d}.png"), pred_colored)
+
+                # Save GT if available
+                if gt_np is not None:
+                    gt_frame = gt_np[bi, ti].numpy()
+                    gt_frame = np.clip(gt_frame, 0, 1)
+                    gt_frame = (gt_frame * 255).astype(np.uint8)
+                    gt_colored = cv2.applyColorMap(gt_frame, colormap)
+                    cv2.imwrite(osp.join(gt_dir, f"t_{ti:02d}.png"), gt_colored)
+
+                    # Save side-by-side comparison (GT | Pred)
+                    comparison = np.hstack([gt_colored, pred_colored])
+                    cv2.imwrite(osp.join(compare_dir, f"t_{ti:02d}.png"), comparison)
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value.
        

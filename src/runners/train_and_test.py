@@ -154,7 +154,7 @@ class Trainer(BaseRunner):
                 if self._run_test:
                     log.info('(TEST) @ Epoch {}'.format(epoch+1))
                     torch.cuda.empty_cache()
-                    test_results = test_epoch(epoch+1, self._model, self._test_loader, self._loss_criteria, self._device, self._cfg, use_fp16=self._use_fp16)
+                    test_results = test_epoch(epoch+1, self._model, self._test_loader, self._loss_criteria, self._device, self._cfg, use_fp16=self._use_fp16, output_dir=self._output_dir)
                     torch.cuda.empty_cache()
 
             vi_results = {'prec': None, 'recall': None, 'f1': None, 'accuracy': None}

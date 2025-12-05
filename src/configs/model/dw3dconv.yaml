@@ -1,0 +1,27 @@
+name: dw3dconv
+frames_in: 16
+frames_out: 16
+inp_height: 288
+inp_width: 512
+out_height: 288
+out_width: 512
+rgb_diff: False
+out_scales: [0]
+
+# === DW3DConv (SpatioTemporalUNet) core ===
+in_channels: 3
+out_channels: 1
+
+# UNet encoder/decoder structure
+# depths: number of conv blocks per encoder stage
+# channels: feature channels per encoder stage
+depths: [2, 2, 8, 2]
+channels: [32, 64, 128, 256]
+
+# num_spatial_stages: first N stages use 2D convs (no temporal mixing)
+# remaining stages use 3D convs (spatiotemporal)
+# null -> defaults to (num_stages - 2)
+num_spatial_stages: 2
+
+# bottleneck_depth: number of 3D conv blocks in bottleneck
+bottleneck_depth: 2

@@ -52,7 +52,7 @@ def build_dataloader(
 
     train_clip_datasets = {}
     test_clip_datasets  = {}
-    if model_name in ['tracknetv2', 'hrnet', 'hrcnet', 'monotrack', 'restracknetv2', 'deepball', 'ballseg']:
+    if model_name in ['tracknetv2', 'hrnet', 'hrcnet', 'dw3dconv', 'monotrack', 'restracknetv2', 'deepball', 'ballseg']:
         train_dataset = ImageDataset(cfg, 
                                      dataset=dataset.train, 
                                      input_wh=input_wh, 
