@@ -5,18 +5,18 @@ test_clip: True
 #inference_video: True
 sampler:
         name: random
-        train_batch_size: 4
+        train_batch_size: 16
         train_shuffle_batch: True
         train_drop_last: True
-        test_batch_size: 4
+        test_batch_size: 16
         test_shuffle_batch: False
         test_drop_last: False
-        inference_video_batch_size: 4
+        inference_video_batch_size: 8
         inference_video_shuffle_batch: False
         inference_video_drop_last: False
-train_num_workers: 8
-test_num_workers: 8
-inference_video_num_workers: 8
+train_num_workers: 4
+test_num_workers: 4
+inference_video_num_workers: 4
 heatmap:
         name: binary_fixed_size
         sigmas: [2.5]

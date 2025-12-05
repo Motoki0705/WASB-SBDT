@@ -884,3 +884,50 @@ class HRCNetForWASB(HRCNet):
     def forward(self, x: torch.Tensor) -> Dict[int, torch.Tensor]:
         outputs = super().forward(x)
         return {0: outputs["out"]}
+
+if __name__ == "__main__":
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Dummy input: (B, T, C, H, W)
+    b, t, c, h, w = 1, 16, 3, 288, 512
+    inputs = torch.rand(b, t, c, h, w, device=device)
+
+    model = HRCNet(
+        in_channels=3,
+        out_channels=1,
+        high_channels=64,
+        low_channels=64,
+        num_stages=3,
+        high_block="DW_BASIC",
+        low_block="DW_BASIC",
+        num_high_blocks=2,
+        num_low_blocks=1,
+        upsample_mode="nearest",
+        downsample_kwargs=dict(
+            num_blocks=4,
+            expand_ratio=4.0,
+            use_se=True,
+            se_reduction=4,
+            activation="hswish",
+        ),
+        transformer_kwargs=dict(
+            d_model=64,
+            num_heads=8,
+            dim_ff=256,
+            dropout=0.1,
+            depth=2,
+        ),
+        temporal_type="transformer",
+        temporal_kwargs=dict(
+            num_heads=8,
+            dim_ff=256,
+            dropout=0.1,
+            depth=2,
+        ),
+    ).to(device)
+
+    model.eval()
+    for _ in range(10):
+        with torch.amp.autocast(device_type=device, dtype=torch.float16):
+            outputs = model(inputs)
+        print("out:", outputs["out"].shape)

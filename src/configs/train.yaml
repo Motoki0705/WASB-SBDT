@@ -1,7 +1,7 @@
 defaults:
   - runner: train
   - dataset: tennis
-  - model: hrcnet
+  - model: wasb
   - dataloader: default
   - loss: hm_bce
   - optimizer: adam_multistep
@@ -14,7 +14,7 @@ hydra:
   run:
     dir: /root/outputs/${hydra.job.name}/${now:%Y-%m-%d_%H-%M-%S}
 
-output_dir:
+output_dir: ../outputs/${model.name}
 seed: 1234
 
 # Enable training split loading

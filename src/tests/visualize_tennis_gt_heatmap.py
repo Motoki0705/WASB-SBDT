@@ -29,7 +29,7 @@ def main() -> None:
     project_root = Path(__file__).resolve().parents[1]
     os.chdir(project_root)
 
-    with initialize(version_base=None, config_path="configs"):
+    with initialize(version_base=None, config_path="../configs"):
         cfg: DictConfig = compose(config_name="train")
 
     tennis = Tennis(cfg)
@@ -71,7 +71,6 @@ def main() -> None:
 
     video_path = out_root / f"{match}_{clip}.mp4"
     gen_video(str(video_path), str(vis_dir))
-
-
+    print("Video saved to:", video_path)
 if __name__ == "__main__":
     main()

@@ -1,10 +1,18 @@
 name: hrcnet
+frames_in: 5
+frames_out: 5
+inp_height: 288
+inp_width: 512
+out_height: 288
+out_width: 512
+rgb_diff: False
+out_scales: [0]
 
 # === HRCNet core ===
 in_channels: 3
 out_channels: 1
-high_channels: 64
-low_channels: 64
+high_channels: 32
+low_channels: 32
 
 num_stages: 3
 high_block: "DW_BASIC"   # "BASIC" / "DW_BASIC" / "BOTTLENECK"
@@ -27,15 +35,15 @@ downsample:
 
 # === Spatial Transformer (spatial transformer on the low branch) ===
 spatial_transformer:
-  d_model: 64            # should match low_channels
+  d_model: 32           # should match low_channels
   num_heads: 8
-  dim_ff: 256
+  dim_ff: 128
   dropout: 0.1
   depth: 2
 
 # === Temporal Module ===
 temporal:
-  type: "transformer"    # "none" / "tsm" / "conv1d" / "convgru" / "transformer"
+  type: "tsm"    # "none" / "tsm" / "conv1d" / "convgru" / "transformer"
 
   # Per-type sub-configuration (only the selected type is used)
   tsm:
@@ -52,6 +60,6 @@ temporal:
 
   transformer:
     num_heads: 8
-    dim_ff: 256
+    dim_ff: 128
     dropout: 0.1
     depth: 2

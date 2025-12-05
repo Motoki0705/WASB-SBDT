@@ -96,18 +96,18 @@ def build_dataloader(
     train_loader = DataLoader(dataset=train_dataset,
                               batch_sampler=train_sampler,
                               num_workers=cfg['dataloader']['train_num_workers'],
-                              pin_memory=False)
+                              pin_memory=True)
     test_loader = DataLoader(dataset=test_dataset,
                              batch_sampler=test_sampler,
                              num_workers=cfg['dataloader']['test_num_workers'],
-                             pin_memory=False)
+                             pin_memory=True)
 
     train_clip_loaders_and_gts = {}
     for key, clip_dataset in train_clip_datasets.items():
         clip_loader = DataLoader(dataset=clip_dataset,
                                  batch_sampler=train_clip_samplers[key],
                                  num_workers=cfg['dataloader']['inference_video_num_workers'],
-                                 pin_memory=False)
+                                 pin_memory=True)
         train_clip_loaders_and_gts[key] = {'clip_loader': clip_loader, 'clip_gt': dataset.train_clip_gts[key]}
 
     test_clip_loaders_and_gts = {}
@@ -115,7 +115,7 @@ def build_dataloader(
         clip_loader = DataLoader(dataset=clip_dataset,
                                  batch_sampler=test_clip_samplers[key],
                                  num_workers=cfg['dataloader']['inference_video_num_workers'],
-                                 pin_memory=False)
+                                 pin_memory=True)
         test_clip_loaders_and_gts[key] = {'clip_loader': clip_loader, 'clip_gt': dataset.test_clip_gts[key]}
 
     return train_loader, test_loader, train_clip_loaders_and_gts, test_clip_loaders_and_gts
